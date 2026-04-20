@@ -1,5 +1,5 @@
 import PublicCertificateVerifier from "@/components/PublicCertificateVerifier";
 
-export default function Home() {
+export default function CertificateVerifierPage() {
   return <PublicCertificateVerifier />;
 }
