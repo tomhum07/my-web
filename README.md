@@ -38,6 +38,7 @@ npm run dev
 Required public env vars:
 
 - `NEXT_PUBLIC_SEPOLIA_RPC_URL`: Sepolia RPC endpoint used for on-chain verification.
+- `NEXT_PUBLIC_CERTIFICATE_SAVE_API_URL`: Backend endpoint to persist full admin certificate form data and uploaded image (example: `http://localhost:5086/api/Certificates`).
 
 If not set, app falls back to a public Sepolia endpoint.
 

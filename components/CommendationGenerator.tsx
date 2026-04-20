@@ -25,6 +25,9 @@ type CommendationGeneratorProps = {
 };
 
 const DEFAULT_ISSUE_DATE = "00 tháng 00 năm 2026";
+const CERTIFICATE_SAVE_API_URL = "/api/certificates";
+const VIETNAM_UTC_OFFSET = "+07:00";
+const DEFAULT_DATE_OF_BIRTH_ISO = "1111-01-01";
 
 const dancingScript = Dancing_Script({
   subsets: ["latin", "vietnamese"],
@@ -61,10 +64,18 @@ function parseIssueDateToTimestamp(displayValue: string) {
   const isoDate = getDateInputValue(displayValue);
   if (!isoDate) return null;
 
-  const parsedDate = new Date(`${isoDate}T00:00:00Z`);
+  const parsedDate = new Date(`${isoDate}T00:00:00${VIETNAM_UTC_OFFSET}`);
   if (Number.isNaN(parsedDate.getTime())) return null;
 
   return Math.floor(parsedDate.getTime() / 1000);
+}
+
+function toDateTimeIso(dateIso: string) {
+  if (!dateIso) {
+    return "";
+  }
+
+  return `${dateIso}T00:00:00${VIETNAM_UTC_OFFSET}`;
 }
 
 function sanitizeFileName(value: string) {
@@ -73,6 +84,31 @@ function sanitizeFileName(value: string) {
     .replace(/[\\/:*?"<>|]/g, "-")
     .replace(/\s+/g, "_")
     .slice(0, 80);
+}
+
+function appendBackendField(
+  formData: FormData,
+  key: string,
+  value: string | number | boolean | null | undefined,
+  enabled = true
+) {
+  if (!enabled) {
+    formData.append(key, "");
+    return;
+  }
+
+  if (value === null || value === undefined) {
+    formData.append(key, "");
+    return;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    formData.append(key, trimmed);
+    return;
+  }
+
+  formData.append(key, String(value));
 }
 
 function downloadDataUrl(dataUrl: string, fileName: string) {
@@ -234,7 +270,15 @@ export default function CommendationGenerator({
 
       const imageBlob = dataUrlToBlob(imageUrl);
       const metadataHash = hashMetadataJson(metadataJson);
+      const normalizedCertHash = metadataHash.trim().toLowerCase();
+      const backendDocumentType = templateMap[documentType].title;
       const parsedExpiration = isPermanent ? 0 : parseIssueDateToTimestamp(expirationDate);
+      const issueDateIso = getDateInputValue(issueDate);
+      const expirationDateIso = getDateInputValue(expirationDate);
+      const resolvedExpirationDateIso =
+        !isPermanent && expirationDateIso && !expirationDateIso.includes("-00-")
+          ? expirationDateIso
+          : "";
 
       if (!studentWalletAddress.trim()) {
         throw new Error("Vui long nhap dia chi vi cua hoc sinh.");
@@ -257,7 +301,7 @@ export default function CommendationGenerator({
 
       setDownloadMessage("Phase 2: Sending transaction to blockchain...");
       const tx = await contract.issueCertificate(
-        metadataHash,
+        normalizedCertHash,
         studentWalletAddress.trim(),
         parsedExpiration ?? 0
       );
@@ -279,25 +323,69 @@ export default function CommendationGenerator({
       });
 
       const formData = new FormData();
-      formData.append("image", imageFile);
-      formData.append("studentName", studentName);
-      formData.append("studentWalletAddress", studentWalletAddress.trim());
-      formData.append("imageHash", metadataHash);
-      formData.append("documentType", documentType);
-      formData.append("expirationTimestamp", String(parsedExpiration ?? 0));
-      formData.append("metadataJson", metadataJson);
+      const isDiplomaDocument = documentType === "diploma";
+      const isCommendationOrCertificate = !isDiplomaDocument;
+      const backendGraduationYear = isDiplomaDocument
+        ? Number.parseInt(graduationYear, 10) || null
+        : 1111;
+
+      formData.append("File", imageFile);
+      appendBackendField(formData, "StudentName", studentName);
+      appendBackendField(formData, "StudentWallet", studentWalletAddress);
+      formData.append("CertHash", normalizedCertHash);
+      formData.append("DocumentType", backendDocumentType);
+      formData.append("Title", templateMap[documentType].title);
+      appendBackendField(formData, "ClassName", studentClass);
+      appendBackendField(formData, "Department", faculty);
+      appendBackendField(formData, "Content", content, isCommendationOrCertificate);
+      appendBackendField(formData, "Location", location);
+      appendBackendField(formData, "DegreeType", diplomaType, isDiplomaDocument);
+      appendBackendField(formData, "Specialization", major, isDiplomaDocument);
+      appendBackendField(
+        formData,
+        "DateOfBirth",
+        toDateTimeIso(dateOfBirth || DEFAULT_DATE_OF_BIRTH_ISO)
+      );
+      appendBackendField(
+        formData,
+        "GraduationYear",
+        backendGraduationYear
+      );
+      appendBackendField(
+        formData,
+        "Classification",
+        graduationRank,
+        isDiplomaDocument && diplomaTypeMap[diplomaType].showRank
+      );
+      appendBackendField(formData, "IssueDate", toDateTimeIso(issueDateIso));
+      appendBackendField(
+        formData,
+        "ExpirationDate",
+        resolvedExpirationDateIso ? toDateTimeIso(resolvedExpirationDateIso) : null
+      );
+      formData.append("IsPermanent", String(isPermanent));
+      formData.append("ExpirationTimestamp", String(parsedExpiration ?? 0));
 
       try {
-        const response = await fetch("/api/certificates", {
+        const response = await fetch(CERTIFICATE_SAVE_API_URL, {
           method: "POST",
           body: formData,
         });
 
         if (!response.ok) {
           const errorText = await response.text();
-          console.warn("Backend upload failed:", errorText || response.statusText);
+          let backendErrorDetails = errorText || response.statusText;
+
+          try {
+            const parsed = JSON.parse(errorText) as { details?: string; error?: string };
+            backendErrorDetails = parsed.details || parsed.error || backendErrorDetails;
+          } catch {
+            // Keep plain-text response when body is not JSON.
+          }
+
+          console.warn("Backend upload failed:", backendErrorDetails);
           setDownloadMessage(
-            "Da phat hanh tren blockchain va tai anh thanh cong. Khong the dong bo backend."
+            `Da phat hanh tren blockchain va tai anh thanh cong. Khong the dong bo backend. ${backendErrorDetails}`
           );
           return;
         }
