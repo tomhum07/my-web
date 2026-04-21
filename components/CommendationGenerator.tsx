@@ -374,9 +374,7 @@ export default function CommendationGenerator({
         "ExpirationDate",
         resolvedExpirationDateIso ? normalizeDateIso(resolvedExpirationDateIso) : null
       );
-      formData.append("Status", "0");
-      formData.append("IsPermanent", String(isPermanent));
-      formData.append("ExpirationTimestamp", String(parsedExpiration ?? 0));
+      formData.append("Status", "false");
 
       try {
         const response = await fetch(CERTIFICATE_SAVE_API_URL, {
