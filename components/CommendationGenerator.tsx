@@ -27,7 +27,6 @@ type CommendationGeneratorProps = {
 const DEFAULT_ISSUE_DATE = "00 tháng 00 năm 2026";
 const CERTIFICATE_SAVE_API_URL = "/api/certificates";
 const VIETNAM_UTC_OFFSET = "+07:00";
-const DEFAULT_DATE_OF_BIRTH_ISO = "1111-01-01";
 
 const dancingScript = Dancing_Script({
   subsets: ["latin", "vietnamese"],
@@ -70,12 +69,12 @@ function parseIssueDateToTimestamp(displayValue: string) {
   return Math.floor(parsedDate.getTime() / 1000);
 }
 
-function toDateTimeIso(dateIso: string) {
+function normalizeDateIso(dateIso: string) {
   if (!dateIso) {
     return "";
   }
 
-  return `${dateIso}T00:00:00${VIETNAM_UTC_OFFSET}`;
+  return dateIso;
 }
 
 function sanitizeFileName(value: string) {
@@ -134,8 +133,8 @@ export default function CommendationGenerator({
   const [content, setContent] = useState("Sinh viên xuất sắc - Năm học 2024-2025");
   const [diplomaType, setDiplomaType] = useState<DiplomaType>("engineer");
   const [major, setMajor] = useState("Khoa học máy tính - Công nghệ phần mềm");
-  const [dateOfBirth, setDateOfBirth] = useState("2004-02-22");
-  const [graduationYear, setGraduationYear] = useState("2028");
+  const [dateOfBirth, setDateOfBirth] = useState("");
+  const [graduationYear, setGraduationYear] = useState("");
   const [graduationRank, setGraduationRank] = useState("Xuất sắc");
   const [location, setLocation] = useState("Đồng Tháp");
   const [issueDate, setIssueDate] = useState(DEFAULT_ISSUE_DATE);
@@ -173,6 +172,13 @@ export default function CommendationGenerator({
     engineer: { label: "KỸ SƯ", showRank: true },
     doctor: { label: "TIẾN SĨ", showRank: false },
     master: { label: "THẠC SĨ", showRank: false },
+  };
+
+  const backendDegreeTypeMap: Record<DiplomaType, string> = {
+    bachelor: "Cử nhân",
+    engineer: "Kỹ sư",
+    doctor: "Tiến sĩ",
+    master: "Thạc sĩ",
   };
 
   const handleIssueDateChange = (event: DateInputEvent) => {
@@ -325,9 +331,7 @@ export default function CommendationGenerator({
       const formData = new FormData();
       const isDiplomaDocument = documentType === "diploma";
       const isCommendationOrCertificate = !isDiplomaDocument;
-      const backendGraduationYear = isDiplomaDocument
-        ? Number.parseInt(graduationYear, 10) || null
-        : 1111;
+      const backendGraduationYear = Number.parseInt(graduationYear, 10) || null;
 
       formData.append("File", imageFile);
       appendBackendField(formData, "StudentName", studentName);
@@ -339,17 +343,24 @@ export default function CommendationGenerator({
       appendBackendField(formData, "Department", faculty);
       appendBackendField(formData, "Content", content, isCommendationOrCertificate);
       appendBackendField(formData, "Location", location);
-      appendBackendField(formData, "DegreeType", diplomaType, isDiplomaDocument);
+      appendBackendField(
+        formData,
+        "DegreeType",
+        backendDegreeTypeMap[diplomaType],
+        isDiplomaDocument
+      );
       appendBackendField(formData, "Specialization", major, isDiplomaDocument);
       appendBackendField(
         formData,
         "DateOfBirth",
-        toDateTimeIso(dateOfBirth || DEFAULT_DATE_OF_BIRTH_ISO)
+        dateOfBirth ? normalizeDateIso(dateOfBirth) : null,
+        isDiplomaDocument
       );
       appendBackendField(
         formData,
         "GraduationYear",
-        backendGraduationYear
+        backendGraduationYear,
+        isDiplomaDocument
       );
       appendBackendField(
         formData,
@@ -357,12 +368,13 @@ export default function CommendationGenerator({
         graduationRank,
         isDiplomaDocument && diplomaTypeMap[diplomaType].showRank
       );
-      appendBackendField(formData, "IssueDate", toDateTimeIso(issueDateIso));
+      appendBackendField(formData, "IssueDate", normalizeDateIso(issueDateIso));
       appendBackendField(
         formData,
         "ExpirationDate",
-        resolvedExpirationDateIso ? toDateTimeIso(resolvedExpirationDateIso) : null
+        resolvedExpirationDateIso ? normalizeDateIso(resolvedExpirationDateIso) : null
       );
+      formData.append("Status", "0");
       formData.append("IsPermanent", String(isPermanent));
       formData.append("ExpirationTimestamp", String(parsedExpiration ?? 0));
 
@@ -755,7 +767,7 @@ export default function CommendationGenerator({
                     <div className="pointer-events-none absolute left-[33%] top-[50%] z-10 w-[54%] whitespace-normal break-words text-left text-[10px] leading-tight text-black sm:text-[18px]">
                       <span className="mb-1 block">Cho: {studentGenderLabel} {studentName || "LÊ MINH TRỌNG"}</span>
                       <span className="mb-1 block">Ngày sinh: {formatDateSlash(dateOfBirth)}</span>
-                      <span className="mb-1 block">Năm tốt nghiệp: {graduationYear || "2028"}</span>
+                      <span className="mb-1 block">Năm tốt nghiệp: {graduationYear || "____"}</span>
                       {diplomaTypeMap[diplomaType].showRank && (
                         <span className="block">Xếp loại tốt nghiệp: {graduationRank || "Xuất sắc"}</span>
                       )}

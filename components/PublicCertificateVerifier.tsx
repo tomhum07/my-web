@@ -62,7 +62,6 @@ function formatUnixTimestamp(seconds: bigint): string {
   const date = new Date(value * 1000);
   return new Intl.DateTimeFormat("vi-VN", {
     dateStyle: "long",
-    timeStyle: "short",
   }).format(date);
 }
 
