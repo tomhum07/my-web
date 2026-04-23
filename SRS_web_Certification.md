@@ -103,3 +103,11 @@ Khi chưa cấu hình backend ngoài, dữ liệu lưu tại API nội bộ dùn
 - Nhóm phát triển frontend
 - Nhóm tích hợp blockchain
 - Nhóm backend/API
+
+
+| STT | MSSV | Họ tên | Nhiệm vụ |
+| :--- | :--- | :--- | :--- |
+| 1 | 0023413714 | Võ Nguyễn Nguyên Hùng | Thiết kế xây dựng: Dapp (front-backend, database, contract, kết nối ví MetaMask, deploy), viết đặc tả hệ thống |
+| 2 | 0023411000 | Lê Minh Trọng | Đóng góp, lên ý tưởng, test dapp |
+| 3 | 0023411852 | Nguyễn Phương Kiệt | Đóng góp, lên ý tưởng, test dapp |
+| 4 | 0023411981 | Phan Quốc Phi | Đóng góp, lên ý tưởng, test dapp |
