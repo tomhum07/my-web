@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { certificateStore, CertificateData } from "./store";
-
-const CERTIFICATE_SAVE_API_URL =
-  process.env.CERTIFICATE_SAVE_API_URL?.trim() ||
-  process.env.NEXT_PUBLIC_CERTIFICATE_SAVE_API_URL?.trim() ||
-  "";
+import { getExternalConfigError, getExternalTargets, shouldProxyToExternal } from "./externalConfig";
 
 function pickFormDataEntry(formData: FormData, keys: string[]) {
   for (const key of keys) {
@@ -269,42 +265,6 @@ function cloneFormData(source: FormData) {
   return cloned;
 }
 
-function shouldProxyToExternal(request: NextRequest) {
-  return getExternalTargets(request).length > 0;
-}
-
-function getExternalTargets(request: NextRequest) {
-  if (!CERTIFICATE_SAVE_API_URL) {
-    return [];
-  }
-
-  try {
-    const configured = new URL(CERTIFICATE_SAVE_API_URL);
-    const currentOrigin = request.nextUrl.origin;
-    if (configured.origin === currentOrigin) {
-      return [];
-    }
-
-    // Common local ASP.NET setup: HTTP endpoint redirects to HTTPS on 7172.
-    if (
-      configured.protocol === "http:" &&
-      configured.hostname === "localhost" &&
-      configured.port === "5086"
-    ) {
-      const httpsLocalUrl = new URL(configured.toString());
-      httpsLocalUrl.protocol = "https:";
-      httpsLocalUrl.port = "7172";
-      return [httpsLocalUrl.toString(), configured.toString()];
-    }
-
-    const targets: string[] = [configured.toString()];
-
-    return Array.from(new Set(targets));
-  } catch {
-    return [];
-  }
-}
-
 async function fetchWithOptionalInsecureLocalTls(
   url: string,
   init: RequestInit,
@@ -330,6 +290,17 @@ async function fetchWithOptionalInsecureLocalTls(
 
 export async function POST(request: NextRequest) {
   try {
+    const configError = getExternalConfigError(request);
+    if (configError) {
+      return NextResponse.json(
+        {
+          error: "Certificate API configuration error",
+          details: configError,
+        },
+        { status: 503 }
+      );
+    }
+
     const formData = await request.formData();
 
     // Extract form fields
@@ -453,6 +424,17 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
+    const configError = getExternalConfigError(request);
+    if (configError) {
+      return NextResponse.json(
+        {
+          error: "Certificate API configuration error",
+          details: configError,
+        },
+        { status: 503 }
+      );
+    }
+
     // Get certificate by hash if provided.
     const imageHash = request.nextUrl.searchParams.get("hash");
     const keyword = request.nextUrl.searchParams.get("q")?.trim().toLowerCase() ?? "";

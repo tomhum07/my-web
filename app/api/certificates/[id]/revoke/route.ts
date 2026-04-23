@@ -1,50 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { certificateStore } from "../../store";
-
-const CERTIFICATE_SAVE_API_URL =
-  process.env.CERTIFICATE_SAVE_API_URL?.trim() ||
-  process.env.NEXT_PUBLIC_CERTIFICATE_SAVE_API_URL?.trim() ||
-  "";
+import { getExternalConfigError, getExternalTargets, shouldProxyToExternal } from "../../externalConfig";
 
 type RevokePayload = {
   reason?: string;
   revokedBy?: string;
   txHash?: string;
 };
-
-function getExternalTargets(request: NextRequest) {
-  if (!CERTIFICATE_SAVE_API_URL) {
-    return [];
-  }
-
-  try {
-    const configured = new URL(CERTIFICATE_SAVE_API_URL);
-    const currentOrigin = request.nextUrl.origin;
-    if (configured.origin === currentOrigin) {
-      return [];
-    }
-
-    if (
-      configured.protocol === "http:" &&
-      configured.hostname === "localhost" &&
-      configured.port === "5086"
-    ) {
-      const httpsLocalUrl = new URL(configured.toString());
-      httpsLocalUrl.protocol = "https:";
-      httpsLocalUrl.port = "7172";
-      return [httpsLocalUrl.toString(), configured.toString()];
-    }
-
-    return [configured.toString()];
-  } catch {
-    return [];
-  }
-}
-
-function shouldProxyToExternal(request: NextRequest) {
-  return getExternalTargets(request).length > 0;
-}
 
 function isIntegerLike(value: string) {
   return /^\d+$/.test(value);
@@ -144,6 +107,17 @@ export async function PUT(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
+    const configError = getExternalConfigError(request);
+    if (configError) {
+      return NextResponse.json(
+        {
+          error: "Certificate API configuration error",
+          details: configError,
+        },
+        { status: 503 }
+      );
+    }
+
     const { id } = await context.params;
     const certificateId = decodeURIComponent(id || "").trim();
 

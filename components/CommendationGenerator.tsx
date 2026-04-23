@@ -25,7 +25,7 @@ type CommendationGeneratorProps = {
 };
 
 const DEFAULT_ISSUE_DATE = "00 tháng 00 năm 2026";
-const CERTIFICATE_SAVE_API_URL = "/api/certificates";
+const CERTIFICATE_SAVE_API_URL = process.env.NEXT_PUBLIC_CERTIFICATE_SAVE_API_URL?.trim() || "";
 const VIETNAM_UTC_OFFSET = "+07:00";
 
 const dancingScript = Dancing_Script({
@@ -377,6 +377,12 @@ export default function CommendationGenerator({
       formData.append("Status", "false");
 
       try {
+        if (!CERTIFICATE_SAVE_API_URL) {
+          throw new Error(
+            "Thieu NEXT_PUBLIC_CERTIFICATE_SAVE_API_URL. Vui long cau hinh URL API BE truoc khi dong bo."
+          );
+        }
+
         const response = await fetch(CERTIFICATE_SAVE_API_URL, {
           method: "POST",
           body: formData,

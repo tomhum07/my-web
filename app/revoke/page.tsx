@@ -33,7 +33,219 @@ type CertificatesListResponse = {
 };
 
 const STORAGE_KEY = "certichain.revoked-certificates";
-const CERTIFICATES_API_URL = "/api/certificates";
+const CERTIFICATES_API_URL = process.env.NEXT_PUBLIC_CERTIFICATE_SAVE_API_URL?.trim() || "";
+
+function ensureCertificatesApiUrl(): string {
+  if (!CERTIFICATES_API_URL) {
+    throw new Error(
+      "Thieu NEXT_PUBLIC_CERTIFICATE_SAVE_API_URL. Vui long cau hinh URL API BE tren frontend."
+    );
+  }
+
+  return CERTIFICATES_API_URL.replace(/\/+$/, "");
+}
+
+function normalizeDocumentType(value: unknown): CertificateListItem["documentType"] {
+  if (typeof value !== "string") {
+    return "certificate";
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "commendation" || normalized === "giấy khen" || normalized === "giay khen") {
+    return "commendation";
+  }
+
+  if (normalized === "diploma" || normalized === "bằng tốt nghiệp" || normalized === "bang tot nghiep") {
+    return "diploma";
+  }
+
+  return "certificate";
+}
+
+function normalizeStatus(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "boolean") {
+    return value ? 1 : 0;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "revoked") {
+      return 1;
+    }
+
+    if (normalized === "false" || normalized === "0" || normalized === "issued") {
+      return 0;
+    }
+
+    const parsed = Number.parseInt(normalized, 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return 0;
+}
+
+function readStringField(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+}
+
+function readIdentifierField(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
+    }
+  }
+
+  return "";
+}
+
+function readNumberField(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === "string") {
+      const parsed = Number.parseInt(value, 10);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  return 0;
+}
+
+function extractRecords(payload: unknown): Record<string, unknown>[] {
+  if (Array.isArray(payload)) {
+    return payload.filter((item): item is Record<string, unknown> => !!item && typeof item === "object");
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+
+  const data = payload as Record<string, unknown>;
+  const listCandidates = [data.items, data.data, data.results, data.records, data.value];
+
+  for (const candidate of listCandidates) {
+    if (Array.isArray(candidate)) {
+      return candidate.filter((item): item is Record<string, unknown> => !!item && typeof item === "object");
+    }
+  }
+
+  return [data];
+}
+
+function toCertificateListItem(record: Record<string, unknown>): CertificateListItem | null {
+  const imageHash = readStringField(record, [
+    "imageHash",
+    "ImageHash",
+    "metadata_hash",
+    "metadataHash",
+    "certHash",
+    "CertHash",
+    "hash",
+    "Hash",
+  ]);
+
+  if (!imageHash) {
+    return null;
+  }
+
+  const statusCandidate =
+    record.status ??
+    record.Status ??
+    record.isRevoked ??
+    record.IsRevoked ??
+    "0";
+
+  return {
+    id: readIdentifierField(record, ["id", "Id", "certificateId", "CertificateId"]) || imageHash,
+    imageHash,
+    studentName: readStringField(record, ["studentName", "StudentName", "student_name"]) || "(Chưa có tên)",
+    studentWalletAddress:
+      readStringField(record, [
+        "studentWalletAddress",
+        "StudentWalletAddress",
+        "studentWallet",
+        "StudentWallet",
+        "student_wallet",
+      ]) || "",
+    documentType: normalizeDocumentType(
+      readStringField(record, ["documentType", "DocumentType", "document_type"])
+    ),
+    expirationTimestamp: readNumberField(record, [
+      "expirationTimestamp",
+      "ExpirationTimestamp",
+      "expiration_timestamp",
+      "expirationDate",
+      "ExpirationDate",
+    ]),
+    status: normalizeStatus(statusCandidate),
+    revokedAt: readStringField(record, ["revokedAt", "RevokedAt", "revoked_at"]) || undefined,
+    revokedBy: readStringField(record, ["revokedBy", "RevokedBy", "revoked_by"]) || undefined,
+    revokeReason:
+      readStringField(record, ["revokeReason", "RevokeReason", "reason", "Reason"]) || undefined,
+    revokeTxHash:
+      readStringField(record, ["revokeTxHash", "RevokeTxHash", "txHashRevoke", "tx_hash_revoke"]) || undefined,
+  };
+}
+
+function normalizeCertificatesList(payload: unknown): CertificatesListResponse {
+  const records = extractRecords(payload);
+  const items = records
+    .map((record) => toCertificateListItem(record))
+    .filter((item): item is CertificateListItem => item !== null);
+
+  return {
+    total: items.length,
+    items,
+  };
+}
+
+function filterCertificatesList(
+  items: CertificateListItem[],
+  filters: {
+    keyword: string;
+    status: "all" | "0" | "1";
+    documentType: "all" | "commendation" | "diploma" | "certificate";
+  }
+) {
+  const keyword = filters.keyword.trim().toLowerCase();
+
+  return items.filter((item) => {
+    const matchesKeyword =
+      !keyword ||
+      item.imageHash.toLowerCase().includes(keyword) ||
+      item.studentName.toLowerCase().includes(keyword) ||
+      item.studentWalletAddress.toLowerCase().includes(keyword);
+
+    const matchesStatus = filters.status === "all" || String(item.status) === filters.status;
+    const matchesDocumentType =
+      filters.documentType === "all" || item.documentType === filters.documentType;
+
+    return matchesKeyword && matchesStatus && matchesDocumentType;
+  });
+}
 
 function getDocumentTypeLabel(value: CertificateListItem["documentType"]): string {
   if (value === "commendation") return "Giấy khen";
@@ -50,6 +262,33 @@ function formatTimestamp(iso: string): string {
     dateStyle: "long",
     timeStyle: "short",
   }).format(new Date(iso));
+}
+
+async function readApiError(response: Response, fallbackMessage: string) {
+  const bodyText = await response.text();
+  if (!bodyText) {
+    return fallbackMessage;
+  }
+
+  try {
+    const payload = JSON.parse(bodyText) as {
+      error?: unknown;
+      details?: unknown;
+      message?: unknown;
+    };
+
+    const parts = [payload.error, payload.details, payload.message]
+      .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+      .map((item) => item.trim());
+
+    if (parts.length > 0) {
+      return parts.join(" - ");
+    }
+
+    return bodyText;
+  } catch {
+    return bodyText;
+  }
 }
 
 function getReadableRevokeError(error: unknown): string {
@@ -89,9 +328,10 @@ export default function RevokeCertificatePage() {
   const [certificateId, setCertificateId] = useState("");
   const [reason, setReason] = useState("Không đạt điều kiện xác thực nội bộ");
   const [searchKeyword, setSearchKeyword] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "0" | "1">("0");
+  const [statusFilter, setStatusFilter] = useState<"all" | "0" | "1">("all");
   const [documentTypeFilter, setDocumentTypeFilter] = useState<"all" | "commendation" | "diploma" | "certificate">("all");
   const [apiCertificates, setApiCertificates] = useState<CertificateListItem[]>([]);
+  const [visibleCertificates, setVisibleCertificates] = useState<CertificateListItem[]>([]);
   const [apiTotal, setApiTotal] = useState(0);
   const [isLoadingCertificates, setIsLoadingCertificates] = useState(false);
   const [entries, setEntries] = useState<RevokedEntry[]>([]);
@@ -116,13 +356,15 @@ export default function RevokeCertificatePage() {
     const nextKeyword = override?.keyword ?? searchKeyword;
     const nextStatus = override?.status ?? statusFilter;
     const nextDocumentType = override?.documentType ?? documentTypeFilter;
+    const nextFilters = {
+      keyword: nextKeyword,
+      status: nextStatus,
+      documentType: nextDocumentType,
+    };
 
     const params = new URLSearchParams();
     if (nextKeyword.trim()) {
       params.set("q", nextKeyword.trim());
-    }
-    if (nextStatus !== "all") {
-      params.set("status", nextStatus);
     }
     if (nextDocumentType !== "all") {
       params.set("documentType", nextDocumentType);
@@ -130,18 +372,25 @@ export default function RevokeCertificatePage() {
 
     setIsLoadingCertificates(true);
     try {
+      const apiBaseUrl = ensureCertificatesApiUrl();
       const url = params.toString()
-        ? `${CERTIFICATES_API_URL}?${params.toString()}`
-        : CERTIFICATES_API_URL;
+        ? `${apiBaseUrl}?${params.toString()}`
+        : apiBaseUrl;
       const response = await fetch(url, { cache: "no-store" });
 
       if (!response.ok) {
-        throw new Error(`Không tải được danh sách bằng (${response.status}).`);
+        const reason = await readApiError(
+          response,
+          `Không tải được danh sách bằng (${response.status}).`
+        );
+        throw new Error(reason);
       }
 
-      const payload = (await response.json()) as CertificatesListResponse;
-      setApiCertificates(Array.isArray(payload.items) ? payload.items : []);
-      setApiTotal(typeof payload.total === "number" ? payload.total : 0);
+      const payload = (await response.json()) as unknown;
+      const normalized = normalizeCertificatesList(payload);
+      setApiCertificates(normalized.items);
+      setApiTotal(normalized.total);
+      setVisibleCertificates(filterCertificatesList(normalized.items, nextFilters));
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Không thể tải danh sách bằng.";
       setMessage(errorMessage);
@@ -172,38 +421,51 @@ export default function RevokeCertificatePage() {
   }, []);
 
   const syncRevokeToApi = async (id: string, payload: { reason: string; revokedBy: string; txHash: string }) => {
-    const response = await fetch(`${CERTIFICATES_API_URL}/${encodeURIComponent(id)}/revoke`, {
+    const apiBaseUrl = ensureCertificatesApiUrl();
+    const response = await fetch(`${apiBaseUrl}/${encodeURIComponent(id)}/revoke`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(true),
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(errorText || `API revoke failed with status ${response.status}`);
+      const reason = await readApiError(
+        response,
+        `API revoke failed with status ${response.status}`
+      );
+      throw new Error(reason);
     }
 
     return response.json();
   };
 
   const resolveBackendRevokeId = async (hash: string): Promise<string> => {
-    const response = await fetch(`${CERTIFICATES_API_URL}?hash=${encodeURIComponent(hash)}`, {
+    const apiBaseUrl = ensureCertificatesApiUrl();
+    const byHashResponse = await fetch(`${apiBaseUrl}?hash=${encodeURIComponent(hash)}`, {
       cache: "no-store",
     });
 
-    if (!response.ok) {
+    if (byHashResponse.ok) {
+      const payload = (await byHashResponse.json()) as Record<string, unknown>;
+
+      const candidateId = readIdentifierField(payload, ["id", "Id", "certificateId", "CertificateId"]);
+      if (candidateId) {
+        return candidateId;
+      }
+    }
+
+    const listResponse = await fetch(apiBaseUrl, { cache: "no-store" });
+    if (!listResponse.ok) {
       return hash;
     }
 
-    const payload = (await response.json()) as { id?: string | number };
-    if (typeof payload.id === "string" && payload.id.trim()) {
-      return payload.id.trim();
-    }
-
-    if (typeof payload.id === "number" && Number.isFinite(payload.id)) {
-      return String(payload.id);
+    const payload = (await listResponse.json()) as unknown;
+    const rows = normalizeCertificatesList(payload).items;
+    const matched = rows.find((item) => item.imageHash.toLowerCase() === hash.toLowerCase());
+    if (matched?.id?.trim()) {
+      return matched.id.trim();
     }
 
     return hash;
@@ -216,9 +478,9 @@ export default function RevokeCertificatePage() {
 
   const handleResetFilters = async () => {
     setSearchKeyword("");
-    setStatusFilter("0");
+    setStatusFilter("all");
     setDocumentTypeFilter("all");
-    await fetchCertificates({ keyword: "", status: "0", documentType: "all" });
+    await fetchCertificates({ keyword: "", status: "all", documentType: "all" });
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -477,13 +739,13 @@ export default function RevokeCertificatePage() {
           <p className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
             Đang tải danh sách bằng...
           </p>
-        ) : apiCertificates.length === 0 ? (
+        ) : visibleCertificates.length === 0 ? (
           <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600">
             Không có bản ghi nào khớp điều kiện lọc.
           </p>
         ) : (
           <div className="space-y-3">
-            {apiCertificates.map((item) => (
+            {visibleCertificates.map((item) => (
               <article key={item.id || item.imageHash} className="rounded-xl border border-slate-200 bg-white p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-sm font-semibold text-slate-900">{item.studentName}</p>
